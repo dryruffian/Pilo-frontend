@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  base:'/',
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
@@ -30,9 +31,10 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     cors: true,
+    historyApiFallback: true,
     proxy: {
       '/api': {
-        target: 'http://43.204.109.176:3000',
+        target: 'api.pilo.life',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
