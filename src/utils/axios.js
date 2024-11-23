@@ -2,7 +2,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'https://www.pilo.life/api',
+  baseURL: 'https://api.pilo.life',
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json'
