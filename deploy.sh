@@ -1,11 +1,12 @@
 #!/bin/bash
 # deploy.sh
 
-echo "Starting backend deployment..."
+echo "Starting frontend deployment..."
 
 # Define paths
-BACKEND_DIR="/home/ubuntu/Pilo-frontend"
+FRONTEND_DIR="/home/ubuntu/Pilo-frontend"
 DOMAIN="www.pilo.life"
+BUILD_DIR="$FRONTEND_DIR/dist"
 
 # Install required packages
 if ! command -v certbot &> /dev/null; then
@@ -27,6 +28,22 @@ fi
 # Get SSL certificate
 echo "Setting up SSL certificate..."
 sudo certbot certonly --nginx -d $DOMAIN --non-interactive --agree-tos --email araj0259@gmail.com
+
+# Build frontend
+echo "Building frontend..."
+if [ -d "$FRONTEND_DIR" ]; then
+    cd "$FRONTEND_DIR"
+    if [ ! -d "node_modules" ]; then
+        echo "Installing dependencies..."
+        npm install
+    fi
+    
+    echo "Creating production build..."
+    npm run build
+else
+    echo "❌ Frontend directory not found at $FRONTEND_DIR"
+    exit 1
+fi
 
 # Create Nginx configuration
 echo "Creating Nginx configuration..."
@@ -93,15 +110,32 @@ http {
         add_header X-XSS-Protection "1; mode=block" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "no-referrer-when-downgrade" always;
-        add_header Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline'" always;
+        add_header Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline' 'unsafe-eval'" always;
 
-        # Proxy Settings
+        # Root directory for built files
+        root $BUILD_DIR;
+        index index.html;
+
+        # Static file serving
         location / {
-            proxy_pass http://localhost:5173;
+            try_files \$uri \$uri/ /index.html;
+            expires 30d;
+            add_header Cache-Control "public, no-transform";
+        }
+
+        # Cache settings for static assets
+        location /assets {
+            expires 1y;
+            add_header Cache-Control "public, no-transform";
+        }
+
+        # API proxy
+        location /api {
+            proxy_pass https://api.pilo.life;
             proxy_http_version 1.1;
             proxy_set_header Upgrade \$http_upgrade;
             proxy_set_header Connection 'upgrade';
-            proxy_set_header Host \$host;
+            proxy_set_header Host api.pilo.life;
             proxy_cache_bypass \$http_upgrade;
 
             # Additional proxy settings
@@ -113,33 +147,6 @@ http {
             proxy_connect_timeout 60;
             proxy_send_timeout 60;
             proxy_read_timeout 60;
-
-            # CORS headers
-            add_header 'Access-Control-Allow-Origin' '*' always;
-            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE' always;
-            add_header 'Access-Control-Allow-Headers' 'Origin, X-Requested-With, Content-Type, Accept, Authorization' always;
-
-            # Handle preflight requests
-            if (\$request_method = 'OPTIONS') {
-                add_header 'Access-Control-Allow-Origin' '*';
-                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE';
-                add_header 'Access-Control-Allow-Headers' 'Origin, X-Requested-With, Content-Type, Accept, Authorization';
-                add_header 'Content-Type' 'text/plain charset=UTF-8';
-                add_header 'Content-Length' 0;
-                return 204;
-            }
-        }
-
-        # Health check endpoint
-        location /health {
-            proxy_pass http://localhost:3000/health;
-            proxy_http_version 1.1;
-            proxy_set_header Host \$host;
-            
-            # Specific timeouts for health check
-            proxy_connect_timeout 10;
-            proxy_send_timeout 10;
-            proxy_read_timeout 10;
         }
     }
 }
@@ -154,28 +161,6 @@ if [ $? -eq 0 ]; then
     sudo systemctl restart nginx
 else
     echo "Nginx configuration is invalid"
-    exit 1
-fi
-
-# Start backend with PM2
-echo "Starting backend server..."
-if [ -d "$BACKEND_DIR" ]; then
-    cd "$BACKEND_DIR"
-    if [ ! -d "node_modules" ]; then
-        echo "Installing dependencies..."
-        npm install
-    fi
-    
-    if pm2 list | grep -q "pilo-front-end"; then
-        pm2 restart pilo-backend
-    else
-        pm2 start npm --name "pilo-front-end" -- run dev
-    fi
-    
-    pm2 save
-    sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u ubuntu --hp /home/ubuntu
-else
-    echo "❌ Backend directory not found at $BACKEND_DIR"
     exit 1
 fi
 
@@ -196,23 +181,15 @@ else
     echo "❌ Nginx failed to start"
 fi
 
-if pm2 pid pilo-backend > /dev/null; then
-    echo "✅ Backend server is running"
-else
-    echo "❌ Backend server failed to start"
-fi
-
 echo "Testing endpoints..."
 echo "Testing HTTPS endpoint..."
 curl -k https://$DOMAIN/
 
 echo "Deployment complete!"
 echo "You can monitor logs with:"
-echo "- Backend logs: pm2 logs"
 echo "- Nginx access logs: sudo tail -f /var/log/nginx/access.log"
 echo "- Nginx error logs: sudo tail -f /var/log/nginx/error.log"
 
 # Show services status
 echo -e "\nService Status:"
-pm2 status
 sudo systemctl status nginx --no-pager
