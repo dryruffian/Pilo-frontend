@@ -26,7 +26,7 @@ fi
 
 # Get SSL certificate
 echo "Setting up SSL certificate..."
-sudo certbot certonly --nginx -d $DOMAIN --non-interactive --agree-tos --email your-email@example.com
+sudo certbot certonly --nginx -d $DOMAIN --non-interactive --agree-tos --email araj0259@gmail.com
 
 # Create Nginx configuration
 echo "Creating Nginx configuration..."
