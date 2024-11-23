@@ -106,7 +106,7 @@ if [ $? -eq 0 ]; then
     echo "Nginx configuration is valid"
     sudo systemctl restart nginx
 else
-    echo "Nginx configuration is invalid"
+    echo "❌ Nginx configuration is invalid"
     exit 1
 fi
 
@@ -132,7 +132,11 @@ echo -e "\nService Status:"
 sudo systemctl status nginx --no-pager
 
 echo -e "\nIMPORTANT: Your site is now running on HTTP."
-echo "To enable HTTPS:"
+echo "To enable HTTPS, follow these steps:"
 echo "1. Make sure port 80 is open in your security group"
-echo "2. Run: sudo certbot --nginx -d $DOMAIN"
-echo "3. Follow the prompts to configure HTTPS"
+echo "2. Install certbot if not already installed:"
+echo "   sudo apt-get update"
+echo "   sudo apt-get install certbot python3-certbot-nginx"
+echo "3. Run: sudo certbot --nginx -d $DOMAIN"
+echo "4. Follow the prompts to configure HTTPS"
+echo "5. Certbot will automatically modify the Nginx configuration for HTTPS"
