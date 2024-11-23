@@ -166,10 +166,10 @@ if [ -d "$BACKEND_DIR" ]; then
         npm install
     fi
     
-    if pm2 list | grep -q "pilo-backend"; then
+    if pm2 list | grep -q "pilo-front-end"; then
         pm2 restart pilo-backend
     else
-        pm2 start index.js --name pilo-backend
+        pm2 start npm --name "pilo-front-end" -- run dev
     fi
     
     pm2 save
@@ -204,7 +204,7 @@ fi
 
 echo "Testing endpoints..."
 echo "Testing HTTPS endpoint..."
-curl -k https://$DOMAIN/health
+curl -k https://$DOMAIN/
 
 echo "Deployment complete!"
 echo "You can monitor logs with:"
