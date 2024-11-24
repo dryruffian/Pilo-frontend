@@ -135,6 +135,7 @@ const Profile = () => {
           {/* Version Info */}
           <div className="mt-6 mb-4 text-center text-sm text-gray-500">
             <p>Version 1.0.0</p>
+            <p>Made with ❤️ By Aditya Raj Panjiyara</p>
           </div>
         </div>
       </div>

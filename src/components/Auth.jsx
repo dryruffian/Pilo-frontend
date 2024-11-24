@@ -49,11 +49,8 @@ export const ProtectedRoute = () => {
 
   // Redirect to login if not authenticated
   if (!isAuthenticated) {
-    return <Navigate 
-      to="/login" 
-      replace 
-      state={{ from: location, message: "Please log in to access this page" }}
-    />;
+    window.location.href = '/login'
+    ;
   }
 
   return <Outlet />;

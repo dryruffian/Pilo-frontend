@@ -8,6 +8,7 @@ function Scanner() {
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState(null);
   const [hasPermission, setHasPermission] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);  // New state for tracking API calls
   const navigate = useNavigate();
   const { authenticatedRequest } = useAuth();
 
@@ -31,7 +32,11 @@ function Scanner() {
   }, []);
 
   const handleScan = useCallback(async (barcodeData) => {
+    if (isProcessing) return; // Prevent multiple simultaneous scans
+    
     try {
+      setIsProcessing(true); // Start processing
+      
       // First, try to fetch the product
       await authenticatedRequest('get', `/api/v1/barcode/${barcodeData}`);
       
@@ -63,8 +68,10 @@ function Scanner() {
       } else {
         setError('An unexpected error occurred');
       }
+      setIsScanning(false); // Only stop scanning if there's an error
+      setIsProcessing(false); // Reset processing state
     }
-  }, [authenticatedRequest, navigate]);
+  }, [authenticatedRequest, navigate, isProcessing]);
 
   const requestCameraPermission = async () => {
     try {
@@ -113,8 +120,7 @@ function Scanner() {
                 width={window.innerWidth}
                 height={window.innerHeight}
                 onUpdate={(err, result) => {
-                  if (result) {
-                    setIsScanning(false);
+                  if (result && !isProcessing) { // Only process if not already processing
                     handleScan(result.text);
                   }
                 }}
@@ -138,7 +144,7 @@ function Scanner() {
               
               <div className="absolute bottom-[120px] left-0 right-0 text-center">
                 <p className="text-yellow-50 text-sm font-medium px-4">
-                  Center the barcode within the frame
+                  {isProcessing ? 'Processing barcode...' : 'Center the barcode within the frame'}
                 </p>
               </div>
             </div>
