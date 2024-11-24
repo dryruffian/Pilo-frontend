@@ -86,7 +86,7 @@ const SignupCard = () => {
         preferences: formData.preferences.map(p => p.value)
       };
 
-      const response = await axios.post('https://3x94zm9g-3000.inc1.devtunnels.ms/auth/signup', payload);
+      const response = await axios.post('https://api.pilo.life/auth/signup', payload);
       
       localStorage.setItem('token', `Bearer ${response.data.data.token}`);
       navigate('/scan');
