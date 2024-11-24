@@ -269,6 +269,8 @@ const ProductPage = () => {
         </div>
       </div>
 
+      <div className='pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-20'>
+
       {/* Product Details */}
       <div className="flex flex-col md:flex-row">
         <div className="p-4 w-full md:w-1/2">
@@ -340,8 +342,8 @@ const ProductPage = () => {
         <div className="space-y-3">
           {Object.entries(nutritionPreferences).map(([key, value]) => (
             <div
-              key={key}
-              className="flex items-center justify-between p-3 bg-white/50 rounded-xl border border-black/10"
+            key={key}
+            className="flex items-center justify-between p-3 bg-white/50 rounded-xl border border-black/10"
             >
               <div className="flex items-center gap-2">
                 {key === 'isVegan' && <Leaf className="w-5 h-5 text-green-600"/>}
@@ -381,7 +383,7 @@ const ProductPage = () => {
 
       {/* Nutrition Advisor */}
       {nutrition_advisor && typeof nutrition_advisor === 'object' && Object.keys(nutrition_advisor).length > 0 && (
-  <div className="p-4">
+        <div className="p-4">
     <h2 className="font-bold mb-4">Nutrition Analysis</h2>
     <div className="space-y-3">
       {Object.entries(nutrition_advisor).map(([nutrient, level]) => {
@@ -394,25 +396,25 @@ const ProductPage = () => {
             bgColor = 'bg-green-50';
             textColor = 'text-green-700';
             break;
-          case 'medium':
-          case 'moderate':
-            bgColor = 'bg-yellow-50';
-            textColor = 'text-yellow-700';
-            break;
-          case 'high':
-            bgColor = 'bg-red-50';
-            textColor = 'text-red-700';
-            break;
-          default:
-            bgColor = 'bg-gray-50';
-            textColor = 'text-gray-700';
-        }
-
-        return (
-          <div 
-            key={nutrient}
-            className={`${bgColor} rounded-xl border border-black/10 p-4`}
-          >
+            case 'medium':
+              case 'moderate':
+                bgColor = 'bg-yellow-50';
+                textColor = 'text-yellow-700';
+                break;
+                case 'high':
+                  bgColor = 'bg-red-50';
+                  textColor = 'text-red-700';
+                  break;
+                  default:
+                    bgColor = 'bg-gray-50';
+                    textColor = 'text-gray-700';
+                  }
+                  
+                  return (
+                    <div 
+                    key={nutrient}
+                    className={`${bgColor} rounded-xl border border-black/10 p-4`}
+                    >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Info className={`w-5 h-5 ${textColor}`} />
@@ -430,6 +432,7 @@ const ProductPage = () => {
     </div>
   </div>
 )}
+      </div>
     </div>
   );
 };
