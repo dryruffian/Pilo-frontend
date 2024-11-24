@@ -1,8 +1,8 @@
-import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { BrowserMultiFormatReader } from '@zxing/browser';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { X, ScanBarcode, Camera, Flashlight, FlipHorizontal, Image } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from '../context/authContext';
+import BarcodeDetectorPolyfill from 'barcode-detector-polyfill';
 
 const IconButton = ({ children, onClick, className = "" }) => (
   <button 
@@ -16,7 +16,8 @@ const IconButton = ({ children, onClick, className = "" }) => (
 const Scanner = () => {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
-  const readerRef = useRef(null);
+  const detectorRef = useRef(null);
+  const animationFrameRef = useRef(null);
   const [scannerState, setScannerState] = useState({
     isScanning: false,
     hasPermission: false,
@@ -24,31 +25,78 @@ const Scanner = () => {
     torchOn: false,
     error: null,
     debugMessage: '',
+    isIOS: false,
   });
   const [cameras, setCameras] = useState([]);
   const [selectedCamera, setSelectedCamera] = useState(null);
   const navigate = useNavigate();
   const { authenticatedRequest } = useAuth();
 
-  // Initialize basic setup
+  // Initialize detector and platform detection
   useEffect(() => {
-    readerRef.current = new BrowserMultiFormatReader();
+    const initializeDetector = async () => {
+      try {
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        setScannerState(prev => ({ ...prev, isIOS }));
+
+        if ('BarcodeDetector' in window) {
+          const formats = await BarcodeDetector.getSupportedFormats();
+          console.log('Supported formats:', formats);
+          detectorRef.current = new BarcodeDetector({
+            formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e']
+          });
+        } else {
+          console.log('Using BarcodeDetector polyfill');
+          detectorRef.current = new BarcodeDetectorPolyfill({
+            formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e']
+          });
+        }
+
+        setScannerState(prev => ({
+          ...prev,
+          debugMessage: 'Detector initialized successfully'
+        }));
+      } catch (err) {
+        console.error('Detector initialization error:', err);
+        setScannerState(prev => ({
+          ...prev,
+          error: 'Failed to initialize barcode detector',
+          debugMessage: `Init failed: ${err.message}`
+        }));
+      }
+    };
+
+    initializeDetector();
+
     return () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
     };
   }, []);
 
-  // Handle camera enumeration
+  // Load available cameras
   useEffect(() => {
     const loadCameras = async () => {
       try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
+        let devices = await navigator.mediaDevices.enumerateDevices();
+        
+        if (scannerState.isIOS && devices.length === 0) {
+          await navigator.mediaDevices.getUserMedia({ video: true });
+          devices = await navigator.mediaDevices.enumerateDevices();
+        }
+
         const videoDevices = devices.filter(device => device.kind === 'videoinput');
         setCameras(videoDevices);
+
         if (videoDevices.length > 0) {
-          setSelectedCamera(videoDevices[0].deviceId);
+          const defaultCamera = scannerState.isIOS 
+            ? videoDevices.find(device => device.label.toLowerCase().includes('back')) || videoDevices[0]
+            : videoDevices[0];
+          setSelectedCamera(defaultCamera.deviceId);
         }
       } catch (err) {
         console.error('Failed to enumerate devices:', err);
@@ -61,87 +109,33 @@ const Scanner = () => {
     };
 
     loadCameras();
-  }, []);
+  }, [scannerState.isIOS]);
 
   const startScanning = useCallback(() => {
-    if (!videoRef.current || scannerState.isProcessing) return;
+    if (!videoRef.current || !detectorRef.current || scannerState.isProcessing) return;
 
     const scan = async () => {
       if (!videoRef.current || !scannerState.isScanning) return;
 
       try {
-        const result = await readerRef.current.decodeOnceFromVideoElement(videoRef.current);
-        if (result) {
-          await handleBarcodeDetected(result.text);
+        const barcodes = await detectorRef.current.detect(videoRef.current);
+        for (const barcode of barcodes) {
+          if (barcode.rawValue) {
+            await handleBarcodeDetected(barcode.rawValue);
+            return;
+          }
         }
       } catch (error) {
-        if (error.message !== 'No MultiFormat Readers were able to detect the code.') {
-          console.error('Scanning error:', error);
-        }
+        console.error('Scanning error:', error);
       }
 
       if (scannerState.isScanning) {
-        requestAnimationFrame(scan);
+        animationFrameRef.current = requestAnimationFrame(scan);
       }
     };
 
-    requestAnimationFrame(scan);
+    animationFrameRef.current = requestAnimationFrame(scan);
   }, [scannerState.isScanning, scannerState.isProcessing]);
-
-  const requestCameraAccess = async () => {
-    try {
-      setScannerState(prev => ({ 
-        ...prev, 
-        debugMessage: 'Requesting camera access...',
-        error: null 
-      }));
-
-      if (!videoRef.current) {
-        throw new Error('Video element not found in DOM');
-      }
-
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          deviceId: selectedCamera ? { exact: selectedCamera } : undefined,
-          facingMode: selectedCamera ? undefined : 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        }
-      });
-
-      streamRef.current = stream;
-      const videoElement = videoRef.current;
-      videoElement.srcObject = stream;
-
-      await new Promise((resolve) => {
-        videoElement.onloadedmetadata = () => {
-          videoElement.play().then(resolve);
-        };
-      });
-
-      setScannerState(prev => ({
-        ...prev,
-        hasPermission: true,
-        isScanning: true,
-        error: null,
-        debugMessage: 'Camera started successfully'
-      }));
-
-      startScanning();
-    } catch (err) {
-      console.error('Camera access error:', err);
-      setScannerState(prev => ({
-        ...prev,
-        hasPermission: false,
-        error: 'Failed to access camera. Please check permissions.',
-        debugMessage: `Access failed: ${err.message}`
-      }));
-    }
-  };
 
   const handleBarcodeDetected = async (barcode) => {
     if (scannerState.isProcessing) return;
@@ -164,6 +158,9 @@ const Scanner = () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
 
       navigate(`/product/${barcode}`);
     } catch (err) {
@@ -172,6 +169,73 @@ const Scanner = () => {
         isProcessing: false,
         isScanning: false,
         error: getErrorMessage(err)
+      }));
+    }
+  };
+
+  const requestCameraAccess = async () => {
+    try {
+      setScannerState(prev => ({ 
+        ...prev, 
+        debugMessage: 'Requesting camera access...',
+        error: null 
+      }));
+
+      if (!videoRef.current) {
+        throw new Error('Video element not found in DOM');
+      }
+
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+
+      const constraints = {
+        video: {
+          deviceId: selectedCamera ? { exact: selectedCamera } : undefined,
+          facingMode: selectedCamera ? undefined : 'environment',
+          width: { ideal: scannerState.isIOS ? 640 : 1280 },
+          height: { ideal: scannerState.isIOS ? 480 : 720 },
+        }
+      };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = stream;
+
+      const videoElement = videoRef.current;
+      videoElement.srcObject = stream;
+      
+      if (scannerState.isIOS) {
+        videoElement.setAttribute('playsinline', 'true');
+        videoElement.setAttribute('webkit-playsinline', 'true');
+      }
+
+      await new Promise((resolve) => {
+        videoElement.onloadedmetadata = () => {
+          videoElement.play()
+            .then(resolve)
+            .catch(error => {
+              console.error('Video playback error:', error);
+              resolve();
+            });
+        };
+      });
+
+      setScannerState(prev => ({
+        ...prev,
+        hasPermission: true,
+        isScanning: true,
+        error: null,
+        debugMessage: 'Camera started successfully'
+      }));
+
+      startScanning();
+    } catch (err) {
+      console.error('Camera access error:', err);
+      setScannerState(prev => ({
+        ...prev,
+        hasPermission: false,
+        error: 'Failed to access camera. Please check permissions.',
+        debugMessage: `Access failed: ${err.message}`
       }));
     }
   };
@@ -221,11 +285,11 @@ const Scanner = () => {
     if (!file) return;
 
     try {
-      const imageUrl = URL.createObjectURL(file);
-      const result = await readerRef.current.decodeFromImageUrl(imageUrl);
+      const bitmap = await createImageBitmap(file);
+      const barcodes = await detectorRef.current.detect(bitmap);
       
-      if (result) {
-        await handleBarcodeDetected(result.text);
+      if (barcodes.length > 0) {
+        await handleBarcodeDetected(barcodes[0].rawValue);
       } else {
         throw new Error('No barcode found in image');
       }
@@ -239,7 +303,6 @@ const Scanner = () => {
 
   return (
     <div className="fixed inset-0 bg-black flex flex-col">
-      {/* Header */}
       <div className="relative bg-yellow-50 p-4 flex justify-between items-center">
         <IconButton onClick={() => navigate('/')}>
           <X className="w-6 h-6" />
@@ -277,15 +340,14 @@ const Scanner = () => {
         </div>
       </div>
 
-      {/* Scanner Area */}
       <div className="flex-1 relative bg-black">
-        {/* Always render the video element */}
         <video
           ref={videoRef}
           className={`absolute inset-0 w-full h-full object-cover ${
             !scannerState.hasPermission ? 'hidden' : ''
           }`}
           playsInline
+          webkit-playsinline="true"
           muted
         />
 
@@ -343,7 +405,6 @@ const Scanner = () => {
         )}
       </div>
 
-      {/* Bottom Safe Area */}
       <div className="h-[env(safe-area-inset-bottom)] bg-black" />
     </div>
   );
