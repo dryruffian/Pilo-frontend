@@ -1,14 +1,13 @@
 import { useCallback, useState, useEffect, useRef } from 'react';
-import { X, ScanBarcode, Camera, Flashlight, FlipHorizontal, Image } from "lucide-react";
+import { X, ScanBarcode, Camera, Flashlight, FlipHorizontal, Image, Bug } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from '../context/authContext';
 import BarcodeDetectorPolyfill from 'barcode-detector-polyfill';
 import PropTypes from 'prop-types';
 
-// Separate IconButton component with prop validation
+// IconButton component
 const IconButton = ({ children, onClick, className = "", disabled = false, as = "button" }) => {
   const Component = as;
-  
   return (
     <Component 
       onClick={disabled ? undefined : onClick}
@@ -36,12 +35,13 @@ const Scanner = ({
   onScanSuccess,
   onScanError,
   supportedFormats = ['ean_13', 'ean_8', 'upc_a', 'upc_e'],
-  scanDelay = 500,
+  scanDelay = 100,
   maxRetries = 3,
   enableImageUpload = true,
   enableTorch = true,
-  customErrorMessages = {}
+  debugMode = true
 }) => {
+  // Refs
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const detectorRef = useRef(null);
@@ -49,6 +49,7 @@ const Scanner = ({
   const retryCountRef = useRef(0);
   const lastScanRef = useRef(0);
   
+  // State
   const [scannerState, setScannerState] = useState({
     isScanning: false,
     hasPermission: false,
@@ -57,142 +58,171 @@ const Scanner = ({
     error: null,
     debugMessage: '',
     isIOS: false,
-    isScannerSupported: false
+    isScannerSupported: false,
+    detectedBarcodes: [],
+    lastFrameProcessed: 0
   });
   
   const [cameras, setCameras] = useState([]);
   const [selectedCamera, setSelectedCamera] = useState(null);
+  
+  // Hooks
   const navigate = useNavigate();
   const { authenticatedRequest } = useAuth();
 
-  // Check browser compatibility
-  useEffect(() => {
-    const checkCompatibility = async () => {
-      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-      const hasMediaDevices = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-      
-      setScannerState(prev => ({ 
-        ...prev, 
-        isIOS,
-        isScannerSupported: hasMediaDevices
+  // Debug logger
+  const debug = useCallback((message, data = null) => {
+    if (debugMode) {
+      console.log(`[Scanner Debug] ${message}`, data || '');
+      setScannerState(prev => ({
+        ...prev,
+        debugMessage: `${message} ${data ? JSON.stringify(data) : ''}`
       }));
+    }
+  }, [debugMode]);
 
-      if (!hasMediaDevices) {
-        setScannerState(prev => ({
-          ...prev,
-          error: customErrorMessages.unsupportedBrowser || 'Your browser does not support barcode scanning'
-        }));
-        return;
-      }
-    };
-
-    checkCompatibility();
-  }, [customErrorMessages.unsupportedBrowser]);
-
-  // Initialize detector with error handling and retries
-  useEffect(() => {
-    const initializeDetector = async () => {
-      const initWithRetry = async (retriesLeft) => {
-        try {
-          if ('BarcodeDetector' in window) {
-            const formats = await BarcodeDetector.getSupportedFormats();
-            const supportedFormatsList = supportedFormats.filter(format => 
-              formats.includes(format)
-            );
-            
-            if (supportedFormatsList.length === 0) {
-              throw new Error('No supported barcode formats available');
-            }
-            
-            detectorRef.current = new BarcodeDetector({
-              formats: supportedFormatsList
-            });
-          } else {
-            detectorRef.current = new BarcodeDetectorPolyfill({
-              formats: supportedFormats
-            });
-          }
-
-          setScannerState(prev => ({
-            ...prev,
-            debugMessage: 'Detector initialized successfully'
-          }));
-        } catch (err) {
-          console.error('Detector initialization error:', err);
-          
-          if (retriesLeft > 0) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            return initWithRetry(retriesLeft - 1);
-          }
-          
-          setScannerState(prev => ({
-            ...prev,
-            error: customErrorMessages.initializationError || 'Failed to initialize barcode detector',
-            debugMessage: `Init failed: ${err.message}`
-          }));
-        }
-      };
-
-      await initWithRetry(maxRetries);
-    };
-
-    initializeDetector();
-
-    return () => {
-      cleanup();
-    };
-  }, [supportedFormats, maxRetries, customErrorMessages.initializationError]);
-
+  // Cleanup function
   const cleanup = useCallback(() => {
+    debug('Cleaning up scanner resources');
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current.getTracks().forEach(track => {
+        track.stop();
+        debug('Stopped track:', track.label);
+      });
     }
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
     }
-  }, []);
+  }, [debug]);
 
-  // Enhanced camera loading with proper error handling
+  // Initialize detector
   useEffect(() => {
-    const loadCameras = async () => {
+    const initializeDetector = async () => {
       try {
-        if (!scannerState.isScannerSupported) return;
-
-        let devices = await navigator.mediaDevices.enumerateDevices();
+        debug('Initializing barcode detector...');
         
-        // Handle iOS permissions
-        if (scannerState.isIOS && devices.length === 0) {
-          await navigator.mediaDevices.getUserMedia({ video: true });
-          devices = await navigator.mediaDevices.enumerateDevices();
-        }
-
-        const videoDevices = devices.filter(device => device.kind === 'videoinput');
-        setCameras(videoDevices);
-
-        if (videoDevices.length > 0) {
-          const defaultCamera = scannerState.isIOS 
-            ? videoDevices.find(device => device.label.toLowerCase().includes('back')) || videoDevices[0]
-            : videoDevices[0];
-          setSelectedCamera(defaultCamera.deviceId);
+        // Check for native support
+        if ('BarcodeDetector' in window) {
+          debug('Using native BarcodeDetector');
+          const formats = await BarcodeDetector.getSupportedFormats();
+          debug('Supported formats:', formats);
+          
+          detectorRef.current = new BarcodeDetector({
+            formats: supportedFormats
+          });
         } else {
-          throw new Error('No cameras found');
+          debug('Using BarcodeDetector polyfill');
+          detectorRef.current = new BarcodeDetectorPolyfill({
+            formats: supportedFormats
+          });
         }
-      } catch (err) {
-        console.error('Failed to enumerate devices:', err);
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 100;
+        canvas.height = 100;
+        await detectorRef.current.detect(canvas);
+        debug('Detector test successful');
+
         setScannerState(prev => ({
           ...prev,
-          error: customErrorMessages.cameraError || 'Failed to find cameras',
-          debugMessage: `Camera enum failed: ${err.message}`
+          isScannerSupported: true
+        }));
+
+      } catch (err) {
+        debug('Detector initialization failed:', err);
+        setScannerState(prev => ({
+          ...prev,
+          error: 'Failed to initialize scanner. Please try reloading the page.',
+          isScannerSupported: false
         }));
       }
     };
 
-    loadCameras();
-  }, [scannerState.isIOS, scannerState.isScannerSupported, customErrorMessages.cameraError]);
+    initializeDetector();
+    return () => cleanup();
+  }, [supportedFormats, debug, cleanup]);
 
-  // Enhanced scanning with rate limiting and error handling
+  // Load cameras
+  useEffect(() => {
+    const loadCameras = async () => {
+      try {
+        debug('Enumerating devices...');
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(device => device.kind === 'videoinput');
+        
+        debug('Found video devices:', videoDevices);
+        setCameras(videoDevices);
+
+        if (videoDevices.length > 0) {
+          // Prefer back camera on mobile
+          const backCamera = videoDevices.find(
+            device => device.label.toLowerCase().includes('back')
+          );
+          setSelectedCamera(backCamera?.deviceId || videoDevices[0].deviceId);
+        }
+      } catch (err) {
+        debug('Failed to enumerate devices:', err);
+        setScannerState(prev => ({
+          ...prev,
+          error: 'Failed to find cameras',
+        }));
+      }
+    };
+
+    if (scannerState.isScannerSupported) {
+      loadCameras();
+    }
+  }, [scannerState.isScannerSupported, debug]);
+
+  // Barcode validation
+  const isValidBarcode = useCallback((barcode) => {
+    const barcodeRegex = /^[0-9]{8,14}$/;
+    return barcodeRegex.test(barcode);
+  }, []);
+
+  // Handle detected barcode
+  const handleBarcodeDetected = async (barcode) => {
+    if (scannerState.isProcessing) return;
+    
+    debug('Processing detected barcode:', barcode);
+    setScannerState(prev => ({ ...prev, isProcessing: true }));
+    
+    try {
+      if (!isValidBarcode(barcode)) {
+        throw new Error('Invalid barcode format');
+      }
+
+      debug('Fetching product data...');
+      const productResponse = await authenticatedRequest('get', `/api/v1/barcode/${barcode}`);
+      
+      await authenticatedRequest('post', '/data/history/add', {
+        productCode: barcode,
+        timestamp: new Date().toISOString(),
+        productData: productResponse.data
+      });
+
+      debug('Scan successful, cleaning up...');
+      cleanup();
+      onScanSuccess?.(barcode, productResponse.data);
+      navigate(`/product/${barcode}`);
+    } catch (err) {
+      debug('Barcode processing error:', err);
+      setScannerState(prev => ({
+        ...prev,
+        isProcessing: false,
+        isScanning: false,
+        error: err.message
+      }));
+      onScanError?.(err);
+    }
+  };
+
+  // Scanning function
   const startScanning = useCallback(() => {
-    if (!videoRef.current || !detectorRef.current || scannerState.isProcessing) return;
+    if (!videoRef.current || !detectorRef.current || scannerState.isProcessing) {
+      debug('Cannot start scanning - prerequisites not met');
+      return;
+    }
 
     const scan = async () => {
       if (!videoRef.current || !scannerState.isScanning) return;
@@ -204,25 +234,45 @@ const Scanner = ({
       }
 
       try {
-        const barcodes = await detectorRef.current.detect(videoRef.current);
+        const video = videoRef.current;
+        if (video.readyState !== video.HAVE_ENOUGH_DATA) {
+          debug('Video not ready yet');
+          animationFrameRef.current = requestAnimationFrame(scan);
+          return;
+        }
+
+        debug('Processing frame');
+        const barcodes = await detectorRef.current.detect(video);
         
-        for (const barcode of barcodes) {
-          if (barcode.rawValue && isValidBarcode(barcode.rawValue)) {
-            lastScanRef.current = now;
-            await handleBarcodeDetected(barcode.rawValue);
-            return;
+        if (debugMode) {
+          setScannerState(prev => ({
+            ...prev,
+            detectedBarcodes: barcodes,
+            lastFrameProcessed: now
+          }));
+        }
+
+        if (barcodes.length > 0) {
+          debug('Barcodes detected:', barcodes);
+          for (const barcode of barcodes) {
+            if (barcode.rawValue && isValidBarcode(barcode.rawValue)) {
+              debug('Valid barcode found:', barcode.rawValue);
+              lastScanRef.current = now;
+              await handleBarcodeDetected(barcode.rawValue);
+              return;
+            }
           }
         }
 
         animationFrameRef.current = requestAnimationFrame(scan);
       } catch (error) {
-        console.error('Scanning error:', error);
+        debug('Scan error:', error);
         retryCountRef.current++;
         
         if (retryCountRef.current > maxRetries) {
           setScannerState(prev => ({
             ...prev,
-            error: customErrorMessages.scanningError || 'Failed to scan barcode',
+            error: 'Scanner encountered an error. Please try again.',
             isScanning: false
           }));
           onScanError?.(error);
@@ -232,50 +282,23 @@ const Scanner = ({
       }
     };
 
+    debug('Starting scan loop');
     animationFrameRef.current = requestAnimationFrame(scan);
-  }, [scannerState.isScanning, scannerState.isProcessing, scanDelay, maxRetries, onScanError, customErrorMessages.scanningError]);
+  }, [
+    scannerState.isScanning,
+    scannerState.isProcessing,
+    scanDelay,
+    maxRetries,
+    onScanError,
+    debug,
+    isValidBarcode,
+  ]);
 
-  const handleBarcodeDetected = async (barcode) => {
-    if (scannerState.isProcessing) return;
-    
-    setScannerState(prev => ({ ...prev, isProcessing: true }));
-    
-    try {
-      if (!isValidBarcode(barcode)) {
-        throw new Error('Invalid barcode format');
-      }
-
-      const productResponse = await authenticatedRequest('get', `/api/v1/barcode/${barcode}`);
-      
-      await authenticatedRequest('post', '/data/history/add', {
-        productCode: barcode,
-        timestamp: new Date().toISOString(),
-        productData: productResponse.data
-      });
-
-      cleanup();
-      onScanSuccess?.(barcode, productResponse.data);
-      navigate(`/product/${barcode}`);
-    } catch (err) {
-      setScannerState(prev => ({
-        ...prev,
-        isProcessing: false,
-        isScanning: false,
-        error: getErrorMessage(err)
-      }));
-      onScanError?.(err);
-    }
-  };
-
-  // Enhanced camera access request with better error handling
+  // Camera access request
   const requestCameraAccess = async () => {
     try {
-      setScannerState(prev => ({ 
-        ...prev, 
-        debugMessage: 'Requesting camera access...',
-        error: null 
-      }));
-
+      debug('Requesting camera access...');
+      
       if (!videoRef.current) {
         throw new Error('Video element not found');
       }
@@ -286,22 +309,26 @@ const Scanner = ({
         video: {
           deviceId: selectedCamera ? { exact: selectedCamera } : undefined,
           facingMode: selectedCamera ? undefined : 'environment',
-          width: { ideal: scannerState.isIOS ? 640 : 1280 },
-          height: { ideal: scannerState.isIOS ? 480 : 720 },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          focusMode: ['continuous', 'auto'],
+          exposureMode: ['continuous', 'auto'],
+          frameRate: { ideal: 30 }
         }
       };
 
+      debug('Requesting stream with constraints:', constraints);
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
 
       const videoElement = videoRef.current;
       videoElement.srcObject = stream;
       
-      if (scannerState.isIOS) {
-        videoElement.setAttribute('playsinline', 'true');
-        videoElement.setAttribute('webkit-playsinline', 'true');
-      }
-
+      videoElement.setAttribute('autoplay', '');
+      videoElement.setAttribute('muted', '');
+      videoElement.setAttribute('playsinline', 'true');
+      
+      debug('Waiting for video to be ready...');
       await new Promise((resolve, reject) => {
         const timeoutId = setTimeout(() => {
           reject(new Error('Video loading timeout'));
@@ -310,74 +337,71 @@ const Scanner = ({
         videoElement.onloadedmetadata = () => {
           clearTimeout(timeoutId);
           videoElement.play()
-            .then(resolve)
+            .then(() => {
+              debug('Video playing successfully');
+              resolve();
+            })
             .catch(reject);
         };
       });
+
+      const track = stream.getVideoTracks()[0];
+      if (track) {
+        const capabilities = track.getCapabilities();
+        debug('Camera capabilities:', capabilities);
+        
+        if (capabilities.focusMode?.includes('continuous')) {
+          await track.applyConstraints({
+            focusMode: 'continuous'
+          });
+        }
+      }
 
       setScannerState(prev => ({
         ...prev,
         hasPermission: true,
         isScanning: true,
         error: null,
-        debugMessage: 'Camera started successfully'
+        debugMessage: 'Camera initialized successfully'
       }));
 
       retryCountRef.current = 0;
       startScanning();
     } catch (err) {
-      console.error('Camera access error:', err);
+      debug('Camera access error:', err);
       setScannerState(prev => ({
         ...prev,
         hasPermission: false,
-        error: customErrorMessages.permissionError || 'Failed to access camera. Please check permissions.',
+        error: 'Failed to access camera. Please check permissions and try again.',
         debugMessage: `Access failed: ${err.message}`
       }));
       onScanError?.(err);
     }
   };
 
-  const isValidBarcode = (barcode) => {
-    const barcodeRegex = /^[0-9]{8,14}$/;
-    return barcodeRegex.test(barcode);
-  };
-
-  const getErrorMessage = (error) => {
-    if (error.message === 'Invalid barcode format') {
-      return customErrorMessages.invalidBarcode || 'Invalid barcode format detected';
-    }
-    if (error.response) {
-      const status = error.response.status;
-      const messages = {
-        400: customErrorMessages.invalidFormat || 'Invalid barcode format',
-        404: customErrorMessages.productNotFound || 'Product not found',
-        503: customErrorMessages.serviceUnavailable || 'Service temporarily unavailable',
-      };
-      return messages[status] || customErrorMessages.fetchError || 'Failed to fetch product information';
-    }
-    return error.request 
-      ? (customErrorMessages.networkError || 'Network error - please check your connection')
-      : (customErrorMessages.unexpectedError || 'An unexpected error occurred');
-  };
-
+  // Toggle torch
   const toggleTorch = async () => {
     if (!enableTorch) return;
     
     try {
       if (streamRef.current) {
         const track = streamRef.current.getVideoTracks()[0];
-        if (track.getCapabilities().torch) {
+        const capabilities = track.getCapabilities();
+        
+        if (capabilities.torch) {
           await track.applyConstraints({
             advanced: [{ torch: !scannerState.torchOn }]
           });
           setScannerState(prev => ({ ...prev, torchOn: !prev.torchOn }));
+          debug('Torch toggled:', !scannerState.torchOn);
         }
       }
     } catch (err) {
-      console.error('Torch toggle error:', err);
+      debug('Torch toggle error:', err);
     }
   };
 
+  // Switch camera
   const switchCamera = async () => {
     const currentIndex = cameras.findIndex(camera => camera.deviceId === selectedCamera);
     const nextIndex = (currentIndex + 1) % cameras.length;
@@ -385,13 +409,14 @@ const Scanner = ({
     await requestCameraAccess();
   };
 
+  // Handle image upload
   const handleImageUpload = async (event) => {
-    if (!enableImageUpload) return;
-    
     const file = event.target.files?.[0];
     if (!file) return;
 
     try {
+      debug('Processing uploaded image...');
+      
       if (!file.type.startsWith('image/')) {
         throw new Error('Invalid file type');
       }
@@ -405,19 +430,21 @@ const Scanner = ({
         throw new Error('No barcode found in image');
       }
     } catch (err) {
+      debug('Image processing error:', err);
       setScannerState(prev => ({
         ...prev,
-        error: customErrorMessages.imageUploadError || 'Could not detect barcode in image'
+        error: 'Could not detect barcode in image'
       }));
       onScanError?.(err);
     } finally {
-      // Clear the input to allow uploading the same file again
       event.target.value = '';
     }
   };
 
+  // Render component
   return (
     <div className="fixed inset-0 bg-black flex flex-col">
+      {/* Header */}
       <div className="relative bg-yellow-50 p-4 flex justify-between items-center">
         <IconButton onClick={() => navigate('/')}>
           <X className="w-6 h-6" />
@@ -464,10 +491,28 @@ const Scanner = ({
               </IconButton>
             </label>
           )}
+          
+          {debugMode && (
+            <IconButton 
+              onClick={() => {
+                debug('Current scanner state:', {
+                  ...scannerState,
+                  cameras: cameras.length,
+                  selectedCamera,
+                  videoReady: videoRef.current?.readyState,
+                  streamActive: streamRef.current?.active
+                });
+              }}
+            >
+              <Bug className="w-6 h-6" />
+            </IconButton>
+          )}
         </div>
       </div>
 
+      {/* Scanner View */}
       <div className="flex-1 relative bg-black">
+        {/* Video Element */}
         <video
           ref={videoRef}
           className={`absolute inset-0 w-full h-full object-cover ${
@@ -477,13 +522,17 @@ const Scanner = ({
           muted
         />
 
+        {/* Initial State - No Permission */}
         {!scannerState.isScannerSupported ? (
           <div className="flex flex-col items-center justify-center h-full bg-yellow-50 p-4">
             <Camera className="w-16 h-16 mb-4 text-gray-400" />
             <p className="text-center mb-4">
-              {scannerState.error || 'Your browser does not support barcode scanning.'}
+              Your browser doesn&apos;t support barcode scanning.
+              Please try using a modern browser.
             </p>
-            <p className="text-xs text-gray-500 mb-4">{scannerState.debugMessage}</p>
+            {debugMode && (
+              <p className="text-xs text-gray-500 mb-4">{scannerState.debugMessage}</p>
+            )}
           </div>
         ) : !scannerState.hasPermission ? (
           <div className="flex flex-col items-center justify-center h-full bg-yellow-50 p-4">
@@ -491,7 +540,9 @@ const Scanner = ({
             <p className="text-center mb-4">
               {scannerState.error || 'Camera permission is required to scan barcodes.'}
             </p>
-            <p className="text-xs text-gray-500 mb-4">{scannerState.debugMessage}</p>
+            {debugMode && (
+              <p className="text-xs text-gray-500 mb-4">{scannerState.debugMessage}</p>
+            )}
             <button
               onClick={requestCameraAccess}
               className="px-6 py-3 bg-black text-yellow-50 rounded-xl font-medium 
@@ -501,13 +552,16 @@ const Scanner = ({
             </button>
           </div>
         ) : scannerState.error ? (
+          // Error State
           <div className="flex flex-col items-center justify-center p-6 bg-white rounded-lg max-w-md mx-auto mt-8">
             <div className="text-red-500 mb-4">
               <Camera className="w-12 h-12" />
             </div>
             <h3 className="text-lg font-semibold mb-2">Error</h3>
             <p className="text-gray-600 text-center mb-4">{scannerState.error}</p>
-            <p className="text-xs text-gray-500 mb-4">{scannerState.debugMessage}</p>
+            {debugMode && (
+              <p className="text-xs text-gray-500 mb-4">{scannerState.debugMessage}</p>
+            )}
             <button
               onClick={() => {
                 setScannerState(prev => ({ ...prev, isScanning: true, error: null }));
@@ -520,72 +574,92 @@ const Scanner = ({
             </button>
           </div>
         ) : (
+          // Active Scanner Overlay
           <div className="absolute inset-0 pointer-events-none">
+            {/* Scanning Frame */}
             <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 
                           w-64 h-64 border-2 border-yellow-50 rounded-2xl">
               <div className="absolute inset-0 flex items-center justify-center">
                 <ScanBarcode className="w-12 h-12 text-yellow-50" />
               </div>
+              
+              {/* Scanning Animation */}
+              <div 
+                className="absolute left-0 right-0 h-0.5 bg-yellow-50/50"
+                style={{
+                  animation: 'scan 2s linear infinite',
+                  top: '50%',
+                  transform: 'translateY(-50%)'
+                }}
+              />
             </div>
             
+            {/* Status Messages */}
             <div className="absolute bottom-24 left-0 right-0 text-center">
               <p className="text-yellow-50 text-sm font-medium px-4">
                 {scannerState.isProcessing 
                   ? 'Processing barcode...' 
                   : 'Center the barcode within the frame'}
               </p>
+              {debugMode && scannerState.detectedBarcodes.length > 0 && (
+                <p className="text-yellow-50/60 text-xs px-4 mt-2">
+                  Detected: {scannerState.detectedBarcodes.map(b => b.rawValue).join(', ')}
+                </p>
+              )}
+              {debugMode && (
+                <p className="text-yellow-50/60 text-xs px-4 mt-1">
+                  {scannerState.debugMessage}
+                </p>
+              )}
             </div>
           </div>
         )}
       </div>
 
+      {/* Bottom Safe Area */}
       <div className="h-[env(safe-area-inset-bottom)] bg-black" />
+
+      {/* CSS for scanning animation */}
+      <style >{`
+        @keyframes scan {
+          0% {
+            top: 0;
+          }
+          50% {
+            top: 100%;
+          }
+          50.1% {
+            top: 0;
+          }
+          100% {
+            top: 100%;
+          }
+        }
+      `}</style>
     </div>
   );
 };
 
-// Prop validation
+// Prop Types
 Scanner.propTypes = {
-  // Required callbacks
   onScanSuccess: PropTypes.func,
   onScanError: PropTypes.func,
-  
-  // Optional configuration
-  supportedFormats: PropTypes.arrayOf(PropTypes.oneOf([
-    'aztec', 'code_128', 'code_39', 'code_93', 'codabar', 'data_matrix',
-    'ean_13', 'ean_8', 'itf', 'pdf417', 'qr_code', 'upc_a', 'upc_e'
-  ])),
+  supportedFormats: PropTypes.arrayOf(PropTypes.string),
   scanDelay: PropTypes.number,
   maxRetries: PropTypes.number,
   enableImageUpload: PropTypes.bool,
   enableTorch: PropTypes.bool,
-  
-  // Custom error messages
-  customErrorMessages: PropTypes.shape({
-    unsupportedBrowser: PropTypes.string,
-    initializationError: PropTypes.string,
-    cameraError: PropTypes.string,
-    permissionError: PropTypes.string,
-    scanningError: PropTypes.string,
-    invalidBarcode: PropTypes.string,
-    invalidFormat: PropTypes.string,
-    productNotFound: PropTypes.string,
-    serviceUnavailable: PropTypes.string,
-    fetchError: PropTypes.string,
-    networkError: PropTypes.string,
-    unexpectedError: PropTypes.string,
-    imageUploadError: PropTypes.string
-  })
+  debugMode: PropTypes.bool
 };
 
-// Default props
+// Default Props
 Scanner.defaultProps = {
   supportedFormats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'],
-  scanDelay: 500,
+  scanDelay: 100,
   maxRetries: 3,
   enableImageUpload: true,
   enableTorch: true,
-  customErrorMessages: {},
+  debugMode: false,
   onScanSuccess: () => {},
   onScanError: () => {}
 };
