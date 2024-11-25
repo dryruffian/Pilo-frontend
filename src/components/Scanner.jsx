@@ -34,7 +34,7 @@ IconButton.propTypes = {
 const Scanner = ({ 
   onScanSuccess,
   onScanError,
-  supportedFormats = ['ean_13', 'ean_8', 'upc_a', 'upc_e'],
+  supportedFormats = ['ean_13', 'ean_8', 'upc_a', 'upc_e','itf','code_128','code_39',"code_93",'codabar'],
   scanDelay = 100,
   maxRetries = 3,
   enableImageUpload = true,
@@ -657,7 +657,7 @@ Scanner.propTypes = {
 
 // Default Props
 Scanner.defaultProps = {
-  supportedFormats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'],
+  supportedFormats: ['ean_13', 'ean_8', 'upc_a', 'upc_e','itf','code_128','code_39',"code_93",'codabar'],
   scanDelay: 100,
   maxRetries: 3,
   enableImageUpload: true,
