@@ -294,6 +294,7 @@ const Scanner = ({
     isValidBarcode,
   ]);
 
+
   // Camera access request
   const requestCameraAccess = async () => {
     try {
@@ -309,11 +310,13 @@ const Scanner = ({
         video: {
           deviceId: selectedCamera ? { exact: selectedCamera } : undefined,
           facingMode: selectedCamera ? undefined : 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          focusMode: ['continuous', 'auto'],
-          exposureMode: ['continuous', 'auto'],
-          frameRate: { ideal: 30 }
+          width: { ideal: 1920  },
+          height: { ideal: 1080 },
+          focusMode: 'continuous',
+          exposureMode: 'continuous',
+          whiteBalanceMode: 'continuous',
+          frameRate: { ideal: 60 },
+          zoom: 1.5
         }
       };
 
