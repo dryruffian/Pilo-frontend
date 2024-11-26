@@ -16,7 +16,7 @@ const SignupCard = () => {
   const navigate = useNavigate();
 
   const allergyOptions = [
-    { value: 'gluten', label: 'Gluten' },
+    { value: 'Agar Agar', label: 'Agar Agar' },
     { value: 'peanuts', label: 'Peanuts' },
     { value: 'eggs', label: 'Eggs' },
     { value: 'milk', label: 'Milk' },
@@ -26,7 +26,7 @@ const SignupCard = () => {
     { value: 'fish', label: 'Fish' },
     { value: 'soybeans', label: 'Soybeans' },
     { value: 'nuts', label: 'Tree Nuts' },
-    { value: 'celery', label: 'Celery' }
+    { value: 'celery', label: 'Celery' },
   ];
 
   const dietaryPreferences = [
@@ -100,7 +100,7 @@ const SignupCard = () => {
   };
 
   return (
-    <div className="relative border-2 border-black w-full max-w-md bg-[#F6F9CD] rounded-[30px] p-4">
+    <div className="w-full px-4 py-6 flex justify-center">
       <div className="flex flex-col gap-4">
         {/* Name Input */}
         <div>
