@@ -66,11 +66,11 @@ const Scanner = ({
   const [cameras, setCameras] = useState([]);
   const [selectedCamera, setSelectedCamera] = useState(null);
   
-  // Hooks
+
   const navigate = useNavigate();
   const { authenticatedRequest } = useAuth();
 
-  // Debug logger
+ 
   const debug = useCallback((message, data = null) => {
     if (debugMode) {
       console.log(`[Scanner Debug] ${message}`, data || '');
@@ -81,7 +81,7 @@ const Scanner = ({
     }
   }, [debugMode]);
 
-  // Cleanup function
+ 
   const cleanup = useCallback(() => {
     debug('Cleaning up scanner resources');
     if (streamRef.current) {
